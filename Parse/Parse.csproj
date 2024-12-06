@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFrameworks>netstandard2.0;net9.0</TargetFrameworks>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
         <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net9.0-windows10.0.19041.0</TargetFrameworks>
 
         <DocumentationFile>bin\Release\netstandard2.0\Parse.xml</DocumentationFile>
-        <Version>3.0.2</Version>
+        <Version>4.0.0</Version>
         <LangVersion>latest</LangVersion>
         
         <Authors>Parse</Authors>
@@ -56,5 +56,9 @@
         <DependentUpon>Resources.resx</DependentUpon>
       </Compile>
     </ItemGroup>
-
+    
+    <Target Name="CopyParseDll" AfterTargets="Build">
+        <Copy SourceFiles="..\..\ParseServer\Parse\bin\Release\net9.0\Parse.dll"
+              DestinationFolder="$(OutputPath)" />
+    </Target>
 </Project>
