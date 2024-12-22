@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -9,85 +8,145 @@ using Parse.Infrastructure;
 using Parse.Abstractions.Platform.Analytics;
 using Parse.Abstractions.Platform.Users;
 
-namespace Parse.Tests
+namespace Parse.Tests;
+
+[TestClass]
+public class AnalyticsTests
 {
-    [TestClass]
-    public class AnalyticsTests
+
+    private Mock<IParseAnalyticsController> _mockAnalyticsController;
+    private Mock<IParseCurrentUserController> _mockCurrentUserController;
+    private MutableServiceHub _hub;
+    private ParseClient _client;
+
+
+    [TestInitialize]
+    public void Initialize()
     {
-#warning Skipped post-test-evaluation cleaning method may be needed.
+        _mockAnalyticsController = new Mock<IParseAnalyticsController>();
+        _mockCurrentUserController = new Mock<IParseCurrentUserController>();
 
-        // [TestCleanup]
-        // public void TearDown() => (Client.Services as ServiceHub).Reset();
+        _mockCurrentUserController
+            .Setup(controller => controller.GetCurrentSessionTokenAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("sessionToken");
 
-        [TestMethod]
-        [AsyncStateMachine(typeof(AnalyticsTests))]
-        public Task TestTrackEvent()
+
+        _hub = new MutableServiceHub
         {
-            MutableServiceHub hub = new MutableServiceHub { };
-            ParseClient client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+            AnalyticsController = _mockAnalyticsController.Object,
+            CurrentUserController = _mockCurrentUserController.Object
+        };
+        _client = new ParseClient(new ServerConnectionData { Test = true }, _hub);
+    }
 
-            Mock<IParseAnalyticsController> mockController = new Mock<IParseAnalyticsController> { };
-            Mock<IParseCurrentUserController> mockCurrentUserController = new Mock<IParseCurrentUserController> { };
+    [TestCleanup]
+    public void Cleanup()
+    {
+        _mockAnalyticsController = null;
+        _mockCurrentUserController = null;
+        _hub = null;
+        _client = null;
+    }
 
-            mockCurrentUserController.Setup(controller => controller.GetCurrentSessionTokenAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>())).Returns(Task.FromResult("sessionToken"));
 
-            hub.AnalyticsController = mockController.Object;
-            hub.CurrentUserController = mockCurrentUserController.Object;
+    [TestMethod]
+    public async Task TestTrackEvent()
+    {
 
-            return client.TrackAnalyticsEventAsync("SomeEvent").ContinueWith(task =>
-            {
-                Assert.IsFalse(task.IsFaulted);
-                Assert.IsFalse(task.IsCanceled);
+        // Arrange
+        var hub = new MutableServiceHub();
+        var client = new ParseClient(new ServerConnectionData { Test = true }, hub);
 
-                mockController.Verify(obj => obj.TrackEventAsync(It.Is<string>(eventName => eventName == "SomeEvent"), It.Is<IDictionary<string, string>>(dict => dict == null), It.IsAny<string>(), It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()), Times.Exactly(1));
-            });
-        }
+        var mockController = new Mock<IParseAnalyticsController>();
+        var mockCurrentUserController = new Mock<IParseCurrentUserController>();
 
-        [TestMethod]
-        [AsyncStateMachine(typeof(AnalyticsTests))]
-        public Task TestTrackEventWithDimension()
-        {
-            MutableServiceHub hub = new MutableServiceHub { };
-            ParseClient client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+        mockCurrentUserController
+            .Setup(controller => controller.GetCurrentSessionTokenAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("sessionToken");
 
-            Mock<IParseAnalyticsController> mockController = new Mock<IParseAnalyticsController> { };
-            Mock<IParseCurrentUserController> mockCurrentUserController = new Mock<IParseCurrentUserController> { };
+        hub.AnalyticsController = mockController.Object;
+        hub.CurrentUserController = mockCurrentUserController.Object;
 
-            mockCurrentUserController.Setup(controller => controller.GetCurrentSessionTokenAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>())).Returns(Task.FromResult("sessionToken"));
+        // Act
+        await client.TrackAnalyticsEventAsync("SomeEvent");
 
-            hub.AnalyticsController = mockController.Object;
-            hub.CurrentUserController = mockCurrentUserController.Object;
+        // Assert
+        mockController.Verify(
+            obj => obj.TrackEventAsync(
+                It.Is<string>(eventName => eventName == "SomeEvent"),
+                It.Is<IDictionary<string, string>>(dict => dict == null),
+                It.IsAny<string>(),
+                It.IsAny<IServiceHub>(),
+                It.IsAny<CancellationToken>()
+            ),
+            Times.Exactly(1)
+        );
+    }
 
-            return client.TrackAnalyticsEventAsync("SomeEvent", new Dictionary<string, string> { ["facebook"] = "hq" }).ContinueWith(task =>
-            {
-                Assert.IsFalse(task.IsFaulted);
-                Assert.IsFalse(task.IsCanceled);
-                mockController.Verify(obj => obj.TrackEventAsync(It.Is<string>(eventName => eventName == "SomeEvent"), It.Is<IDictionary<string, string>>(dict => dict != null && dict.Count == 1), It.IsAny<string>(), It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()), Times.Exactly(1));
-            });
-        }
+    [TestMethod]
+    public async Task TestTrackEventWithDimension()
+    {
+        // Arrange
+        var hub = new MutableServiceHub();
+        var client = new ParseClient(new ServerConnectionData { Test = true }, hub);
 
-        [TestMethod]
-        [AsyncStateMachine(typeof(AnalyticsTests))]
-        public Task TestTrackAppOpened()
-        {
-            MutableServiceHub hub = new MutableServiceHub { };
-            ParseClient client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+        var mockController = new Mock<IParseAnalyticsController>();
+        var mockCurrentUserController = new Mock<IParseCurrentUserController>();
 
-            Mock<IParseAnalyticsController> mockController = new Mock<IParseAnalyticsController> { };
-            Mock<IParseCurrentUserController> mockCurrentUserController = new Mock<IParseCurrentUserController> { };
+        mockCurrentUserController
+            .Setup(controller => controller.GetCurrentSessionTokenAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("sessionToken");
 
-            mockCurrentUserController.Setup(controller => controller.GetCurrentSessionTokenAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>())).Returns(Task.FromResult("sessionToken"));
+        hub.AnalyticsController = mockController.Object;
+        hub.CurrentUserController = mockCurrentUserController.Object;
 
-            hub.AnalyticsController = mockController.Object;
-            hub.CurrentUserController = mockCurrentUserController.Object;
+        var dimensions = new Dictionary<string, string> { ["facebook"] = "hq" };
 
-            return client.TrackLaunchAsync().ContinueWith(task =>
-            {
-                Assert.IsFalse(task.IsFaulted);
-                Assert.IsFalse(task.IsCanceled);
+        // Act
+        await client.TrackAnalyticsEventAsync("SomeEvent", dimensions);
 
-                mockController.Verify(obj => obj.TrackAppOpenedAsync(It.Is<string>(pushHash => pushHash == null), It.IsAny<string>(), It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()), Times.Exactly(1));
-            });
-        }
+        // Assert
+        mockController.Verify(
+            obj => obj.TrackEventAsync(
+                It.Is<string>(eventName => eventName == "SomeEvent"),
+                It.Is<IDictionary<string, string>>(dict => dict != null && dict.Count == 1 && dict["facebook"] == "hq"),
+                It.IsAny<string>(),
+                It.IsAny<IServiceHub>(),
+                It.IsAny<CancellationToken>()
+            ),
+            Times.Exactly(1)
+        );
+    }
+
+    [TestMethod]
+    public async Task TestTrackAppOpened()
+    {
+        // Arrange
+        var hub = new MutableServiceHub();
+        var client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+
+        var mockController = new Mock<IParseAnalyticsController>();
+        var mockCurrentUserController = new Mock<IParseCurrentUserController>();
+
+        mockCurrentUserController
+            .Setup(controller => controller.GetCurrentSessionTokenAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("sessionToken");
+
+        hub.AnalyticsController = mockController.Object;
+        hub.CurrentUserController = mockCurrentUserController.Object;
+
+        // Act
+        await client.TrackLaunchAsync();
+
+        // Assert
+        mockController.Verify(
+            obj => obj.TrackAppOpenedAsync(
+                It.Is<string>(pushHash => pushHash == null),
+                It.IsAny<string>(),
+                It.IsAny<IServiceHub>(),
+                It.IsAny<CancellationToken>()
+            ),
+            Times.Exactly(1)
+        );
     }
 }
