@@ -1,58 +1,8 @@
 # Parse SDK for .NET - MAUI - UNOFFICIAL
 
----
-
-[![Build Status](https://github.com/parse-community/Parse-SDK-dotNET/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/parse-community/Parse-SDK-dotNET/actions/workflows/ci.yml?query=workflow%3Aci+branch%3Amaster)
-[![Coverage](https://img.shields.io/codecov/c/github/parse-community/Parse-SDK-dotNET/master.svg)](https://codecov.io/github/parse-community/Parse-SDK-dotNET?branch=master)
-[![auto-release](https://img.shields.io/badge/%F0%9F%9A%80-auto--release-9e34eb.svg)](https://github.com/parse-community/Parse-SDK-dotNET/releases)
-
-[![.NET Version](https://img.shields.io/badge/.NET-6,_7,_8,_9-5234CE.svg?logo=.net&style=flat)](https://dotnet.microsoft.com)
-[![Nuget](https://img.shields.io/nuget/v/parse.svg)](http://nuget.org/packages/parse)
-
-[![Backers on Open Collective](https://opencollective.com/parse-server/backers/badge.svg)][open-collective-link]
-[![Sponsors on Open Collective](https://opencollective.com/parse-server/sponsors/badge.svg)][open-collective-link]
-[![Forum](https://img.shields.io/discourse/https/community.parseplatform.org/topics.svg)](https://community.parseplatform.org/c/parse-server)
-[![Twitter](https://img.shields.io/twitter/follow/ParsePlatform.svg?label=Follow&style=social)](https://twitter.com/intent/follow?screen_name=ParsePlatform)
-[![Chat](https://img.shields.io/badge/Chat-Join!-%23fff?style=social&logo=slack)](https://chat.parseplatform.org)
+A library that gives you access to the powerful Parse Server backend from any platform supporting .NET Standard 2.0 -> .NET 9 / MAUI. For more information about Parse and its features, visit [parseplatform.org](https://parseplatform.org/).
 
 ---
-
-A library that gives you access to the powerful Parse Server backend from any platform supporting .NET Standard 2.0 and .NET 9 / MAUI. For more information about Parse and its features, visit [parseplatform.org](https://parseplatform.org/).
-
----
-
-- [Parse SDK for .NET](#parse-sdk-for-net)
-  - [Getting Started](#getting-started)
-  - [Compatibility](#compatibility)
-    - [.NET](#net)
-  - [Using the Code](#using-the-code)
-    - [Common Definitions](#common-definitions)
-    - [Client-Side Use](#client-side-use)
-    - [Use In Unity Client](#use-in-unity-client)
-      - [Unity3D on iOS](#unity3d-on-ios)
-      - [Unity3D on Android](#unity3d-on-android)
-    - [Server-Side Use](#server-side-use)
-    - [Basic Demonstration](#basic-demonstration)
-  - [Local Builds](#local-builds)
-  - [.NET Core CLI](#net-core-cli)
-
-
-## Getting Started
-I Plan to push a nuget soon and update here
-
-
-## Compatibility
-
-### .NET
-
-Parse .NET SDK is continuously tested with the most recent releases of .NET to ensure compatibility. We follow the [.NET Long Term Support plan](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core) and only test against versions that are officially supported and have not reached their end-of-life date.
-
-| .NET Version | End-of-Life   | Parse .NET SDK Version |
-|--------------|---------------|------------------------|
-| 6.0          | November 2024 | >= 1.0                 |
-| 7.0          | May 2024      | >= 1.0                 |
-| 8.0          | November 2026 | >= 1.0                 |
-| 9.0          | May 2026      | >= 1.0                 |
 
 ## Using the Code
 Make sure you are using the project's root namespace.
@@ -83,8 +33,7 @@ ParseClient client = new ParseClient(new ServerConnectionData
 
 `ServerConnectionData` is available in the `Parse.Infrastructure` namespace.
 
-The two non-cloning `ParseClient` constructors contain optional parameters for an `IServiceHub` implementation instance and an array of `IServiceHubMutator`s. These should only be used when the behaviour of the SDK needs to be changed such as [when it is used with the Unity game engine](#use-in-unity-client).
-
+The two non-cloning `ParseClient` constructors contain optional parameters for an `IServiceHub` implementation instance and an array of `IServiceHubMutator`s. These should only be used when the behavior of the SDK needs to be changed.
 
 To find full usage instructions for the latest stable release, please visit the [Parse docs website][parse-docs-link]. Please note that the latest stable release is quite old and does not reflect the work being done at the moment.
 
@@ -106,56 +55,6 @@ In your program's entry point, instantiate a `ParseClient` with all the paramete
 ```csharp
 new ParseClient(/* Parameters */).Publicize();
 ```
-
-### Use In Unity Client
-
-In Unity, the same logic applies to use the SDK as in [any other client](#client-side-use), except that a special `IServiceHub` impelementation instance, a `MetadataMutator`, and an `AbsoluteCacheLocationMutator` need to be passed in to one of the non-cloning `ParseClient` constructors in order to specify the environment and platform metadata, as well as the absolute cache location manually. This step is needed because the logic that creates these values automatically will fail and create incorrect values. The functionality to do this automatically may eventually be provided as a Unity package in the future, but for now, the following code can be used.
-
-```csharp
-using System;
-using UnityEngine;
-using Parse.Infrastructure;
-```
-
-```csharp
-new ParseClient(/* Parameters */,
-    new LateInitializedMutableServiceHub { },
-    new MetadataMutator
-    {
-        EnvironmentData = new EnvironmentData { OSVersion = SystemInfo.operatingSystem, Platform = $"Unity {Application.unityVersion} on {SystemInfo.operatingSystemFamily}", TimeZone = TimeZoneInfo.Local.StandardName },
-        HostManifestData = new HostManifestData { Name = Application.productName, Identifier = Application.productName, ShortVersion = Application.version, Version = Application.version }
-    },
-    new AbsoluteCacheLocationMutator
-    {
-        CustomAbsoluteCacheFilePath = $"{Application.persistentDataPath.Replace('/', Path.DirectorySeparatorChar)}{Path.DirectorySeparatorChar}Parse.cache"
-    }
-    ).Publicize();
-```
-
-Other `IServiceHubMutator` implementations are available that do different things, such as the `RelativeCacheLocationMutator`, which allows a custom cache location relative to the default base folder (`System.Environment.SpecialFolder.LocalApplicationData`) to be specified.
-
-If you are having trouble getting the SDK to work on other platforms, try to use the above code to control what values for various metadata information items the SDK will use, to see if that fixes the issue.
-
-#### Unity3D on iOS
-
-When using the Parse SDK on iOS/iPadOS target platforms you may encounter issues during runtime where the creation of ParseObjects using subclassing or other Parse methods fail. This occurs due to the fact that Unity strips code from the project and it will most likely do so for some parts of the Parse.dll assembly file.
-
-To prevent Unity to remove necessary code from the assembly it is necessary to include a link.xml file in your project which tells Unity to not touch anything from the Parse.dll.
-
-```xml
-<linker>
-  <assembly fullname="Parse" preserve="all"/>
-</linker>
-```
-Save the above xml code to a file called 'link.xml' and place it in the Assets folder of your project.
-
-#### Unity3D on Android
-
-When using the Parse SDK on Android target platform you may encounter an issue related to network communication and resolution of host addresses when using the Parse SDK. This occurs in situations where you might use the Parse SDK but did not configure your Android app to require internet access. Whenever a project does not explicitly state it requires internet access Unity will try to remove classes and system assemblies during the build process, causing Parse-calls to fail with different exceptions.
-This may not be the case if your project uses any Unity specific web/networking code, as this will be detected by the engine and the code stripping will not be done.
-
-To set your project, navigate to `Project Settings -> Player -> Other Settings -> Internet Access` and switch it to Require.
-Depending on the version of Unity you are using this setting may be found in a slightly different location or with slightly different naming, use the above path as a guidance.
 
 ### Server-Side Use
 
@@ -180,25 +79,25 @@ The following code shows how to use the Parse .NET SDK to create a new user, sav
 ParseClient client = new ParseClient(/* Parameters */);
 
 // Create a user, save it, and authenticate with it.
-await client.SignUpAsync(username: "Test", password: "Test");
+await ParseClient.Instance.SignUpWithAsync(username: "Test", password: "Test");
 
 // Get the authenticated user. This is can also be done with a variable that stores the ParseUser instance before the SignUp overload that accepts a ParseUser is called.
-Console.WriteLine(client.GetCurrentUser().SessionToken);
+Console.WriteLine( await ParseClient.Instance.GetCurrentUser().SessionToken);
 
 // Deauthenticate the user.
 await client.LogOutAsync();
 
 // Authenticate the user.
-ParseUser user = await client.LogInAsync(username: "Test", password: "Test");
+ParseUser? user = await ParseClient.Instance.LogInWithAsync(username: "Test", password: "Test");
 
 // Create a new object with permessions that allow only the user to modify it.
 ParseObject testObject = new ParseObject("TestClass") { ACL = new ParseACL(user) };
 
 // Bind the ParseObject to the target ParseClient instance. This is unnecessary if Publicize is called on the client.
-testObject.Bind(client);
+testObject.Bind(ParseClient.Instance);
 
 // Set some value on the object.
-testObject.Set("someValue", "This is a value.");
+testObject.Set("someKey", "This is a value.");
 
 // See that the ObjectId of an unsaved object is null;
 Console.WriteLine(testObject.ObjectId);
@@ -210,16 +109,24 @@ await testObject.SaveAsync();
 Console.WriteLine(testObject.ObjectId);
 
 // Query the object back down from the server to check that it was actually saved.
-Console.WriteLine((await client.GetQuery("TestClass").WhereEqualTo("objectId", testObject.ObjectId).FirstAsync()).Get<string>("someValue"));
+ParseObject? objectFetched = await ParseClient.Instance.GetQuery("TestClass")
+    .WhereEqualTo("objectId", testObject.ObjectId)
+    .FirstAsync();
+string? someValue = objectFetched.Get<string>("someKey");
+Console.WriteLine(someValue);
 
 // Mutate some value on the object.
-testObject.Set("someValue", "This is another value.");
+testObject.Set("someKey", "This is another value.");
 
 // Save the object again.
 await testObject.SaveAsync();
 
 // Query the object again to see that the change was made.
-Console.WriteLine((await client.GetQuery("TestClass").WhereEqualTo("objectId", testObject.ObjectId).FirstAsync()).Get<string>("someValue"));
+ParseObject? objectFetched = await ParseClient.Instance.GetQuery("TestClass")
+    .WhereEqualTo("objectId", testObject.ObjectId)
+    .FirstAsync();
+string? someValue = objectFetched.Get<string>("someKey");
+Console.WriteLine(someValue);
 
 // Store the object's objectId so it can be verified that it was deleted later.
 var testObjectId = testObject.ObjectId;
@@ -228,19 +135,17 @@ var testObjectId = testObject.ObjectId;
 await testObject.DeleteAsync();
 
 // Check that the object was deleted from the server.
-Console.WriteLine(await client.GetQuery("TestClass").WhereEqualTo("objectId", testObjectId).FirstOrDefaultAsync() == null);
+Console.WriteLine();
 
 // Deauthenticate the user again.
-await client.LogOutAsync();
+await ParseClient.Instance.LogOutAsync();
 ```
 
 ## Local Builds
-You can build the SDK on any system with the MSBuild or .NET Core CLI installed.
+You can build the SDK on any system with the MSBuild or .NET Core CLI installed. Results can be found under either the `Release/netstandard2.0` or `Debug/netstandard2.0` in the `bin` folder unless a non-standard build configuration is used.
 
 ## .NET Core CLI
 
 ```batch
 dotnet build Parse.sln
 ```
-
-[open-collective-link]: https://opencollective.com/parse-server
