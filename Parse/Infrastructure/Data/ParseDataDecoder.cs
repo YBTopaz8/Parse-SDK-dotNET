@@ -12,9 +12,10 @@ namespace Parse.Infrastructure.Data;
 
 public class ParseDataDecoder : IParseDataDecoder
 {
-    IParseObjectClassController ClassController { get; }
+    private IServiceHub Services { get; }
+    private IParseObjectClassController ClassController => Services.ClassController;
 
-    public ParseDataDecoder(IParseObjectClassController classController) => ClassController = classController;
+    public ParseDataDecoder(IServiceHub serviceHub) => Services = serviceHub ?? throw new ArgumentNullException(nameof(serviceHub));
 
     static string[] Types { get; } = { "Date", "Bytes", "Pointer", "File", "GeoPoint", "Object", "Relation" };
 
@@ -23,7 +24,7 @@ public class ParseDataDecoder : IParseDataDecoder
             return data switch
             {
                 null => default,
-                IDictionary<string, object> { } dictionary when dictionary.ContainsKey("__op") => ParseFieldOperations.Decode(dictionary),
+                IDictionary<string, object> { } dictionary when dictionary.ContainsKey("__op") => ParseFieldOperations.Decode(dictionary,this, ClassController),
 
                 IDictionary<string, object> { } dictionary when dictionary.TryGetValue("__type", out var type) && Types.Contains(type) => type switch
                 {

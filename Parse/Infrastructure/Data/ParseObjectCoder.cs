@@ -9,10 +9,6 @@ using Parse.Platform.Objects;
 
 namespace Parse.Infrastructure.Data;
 
-// TODO: (richardross) refactor entire parse coder interfaces.
-// Done: (YB) though, I wonder why Encode is never used in the ParseObjectCoder class. Might update if I find a use case.
-//Got it now. The Encode method is used in ParseObjectController.cs
-
 
 /// <summary>
 /// Provides methods to encode and decode Parse objects.
