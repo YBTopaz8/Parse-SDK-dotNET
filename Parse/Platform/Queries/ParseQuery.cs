@@ -810,6 +810,31 @@ public class ParseQuery<T> where T : ParseObject
         return GetAsync(objectId, CancellationToken.None);
     }
 
+    public static ParseQuery<T> Or(params ParseQuery<T>[] queries)
+    {
+        if (queries.Length == 0)
+        {
+            throw new ArgumentException("You must provide at least one query to Or.");
+        }
+
+        string className = queries[0].ClassName;
+        var serviceHub = queries[0].Services;
+
+        if (queries.Any(q => q.ClassName != className))
+        {
+            throw new ArgumentException("All queries in an Or query must be for the same class.");
+        }
+
+        var orClause = new Dictionary<string, object>
+        {
+            ["$or"] = queries.Select(q => q.Filters).ToList()
+        };
+
+        var resultQuery = new ParseQuery<T>(serviceHub, className);
+        return new ParseQuery<T>(resultQuery, where: orClause);
+    }
+
+
     /// <summary>
     /// Constructs a ParseObject whose id is already known by fetching data
     /// from the server.
@@ -908,7 +933,11 @@ public class ParseQuery<T> where T : ParseObject
     /// <returns>A hash code for the current object.</returns>
     public override int GetHashCode()
     {
-        // TODO (richardross): Implement this.
-        return 0;
+        int hash = ClassName.GetHashCode();
+        hash = (hash * 31) + (Filters?.GetHashCode() ?? 0);
+        hash = (hash * 31) + (Orderings?.GetHashCode() ?? 0);
+        hash = (hash * 31) + (SkipAmount?.GetHashCode() ?? 0);
+        hash = (hash * 31) + (LimitAmount?.GetHashCode() ?? 0);
+        return hash;
     }
 }
