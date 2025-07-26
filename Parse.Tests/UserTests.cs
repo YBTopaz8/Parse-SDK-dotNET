@@ -69,6 +69,8 @@ public class UserTests
         return user;
     }
 
+
+
     [TestMethod]
     public async Task TestSignUpWithInvalidServerDataAsync()
     {
@@ -372,6 +374,168 @@ public class UserTests
                 It.IsAny<IServiceHub>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+    [TestMethod]
+    [Description("Tests that SignUpAsync throws when essential properties are missing.")]
+    public async Task SignUpAsync_MissingCredentials_ThrowsException()
+    {
+        var user = new ParseUser();
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => user.SignUpAsync(), "Should throw for missing username.");
+
+        user.Username = TestUsername;
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => user.SignUpAsync(), "Should throw for missing password.");
+
+        user.Password = TestPassword;
+        user.ObjectId = TestObjectId;
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => user.SignUpAsync(), "Should throw for existing ObjectId.");
+    }
+
+    //[TestMethod]
+    //[Description("Tests that IsAuthenticatedAsync returns true when the user is the current user.")]
+    //public async Task IsAuthenticatedAsync_WhenCurrentUserMatches_ReturnsTrue()
+    //{
+    //    // Arrange
+    //    var mockCurrentUserController = new Mock<IParseCurrentUserController>();
+    //    var hub = new MutableServiceHub { CurrentUserController = mockCurrentUserController.Object };
+    //    hub.SetDefaults();
+    //    var client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+
+    //    var user = client.GenerateObjectFromState<ParseUser>(new MutableObjectState { ObjectId = TestObjectId, ServerData = new Dictionary<string, object> { ["sessionToken"] = TestSessionToken } }, "_User");
+
+    //    // Mock GetCurrentUserAsync to return the same user.
+    //    mockCurrentUserController.Setup(c => c.GetCurrentUserAsync()).ReturnsAsync(user);
+
+    //    // Act
+    //    var isAuthenticated = await user.IsAuthenticatedAsync();
+
+    //    // Assert
+    //    Assert.IsTrue(isAuthenticated);
+    //}
+
+    [TestMethod]
+    [Description("Tests that IsAuthenticatedAsync returns false when there is no session token.")]
+    public async Task IsAuthenticatedAsync_WhenNoSessionToken_ReturnsFalse()
+    {
+        // Arrange
+        var user = new ParseUser { ObjectId = TestObjectId };
+
+        // Act
+        var isAuthenticated = await user.IsAuthenticatedAsync();
+
+        // Assert
+        Assert.IsFalse(isAuthenticated);
+    }
+
+    [TestMethod]
+    [Description("Tests that removing the username key throws an exception.")]
+    public void Remove_Username_ThrowsInvalidOperationException()
+    {
+        var user = new ParseUser();
+        Assert.ThrowsException<InvalidOperationException>(() => user.Remove("username"));
+    }
+
+    //[TestMethod]
+    //[Description("Tests that setting the session token correctly updates state and saves the current user.")]
+    //public async Task SetSessionTokenAsync_SavesCurrentUser()
+    //{
+    //    // Arrange
+    //    var mockCurrentUserController = new Mock<IParseCurrentUserController>();
+    //    var hub = new MutableServiceHub { CurrentUserController = mockCurrentUserController.Object };
+    //    hub.SetDefaults();
+    //    var client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+    //    var user = client.GenerateObjectFromState<ParseUser>(new MutableObjectState(), "_User");
+
+    //    // Act
+    //    await user.SetSessionTokenAsync("new_token");
+
+    //    // Assert
+    //    Assert.AreEqual("new_token", user.SessionToken);
+    //    mockCurrentUserController.Verify(c => c.SaveCurrentUserAsync(user, It.IsAny<CancellationToken>()), Times.Once);
+    //}
+
+    [TestMethod]
+    [Description("Tests that SaveAsync on a new user throws an exception.")]
+    public async Task SaveAsync_NewUser_ThrowsInvalidOperationException()
+    {
+        var user = new ParseUser();
+        await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => user.SaveAsync());
+    }
+
+    //[TestMethod]
+    //[Description("Tests that SaveAsync on an existing user saves the current user if they match.")]
+    //public async Task SaveAsync_WhenIsCurrentUser_SavesCurrentUser()
+    //{
+    //    // Arrange
+    //    var mockObjectController = new Mock<IParseObjectController>();
+    //    var mockCurrentUserController = new Mock<IParseCurrentUserController>();
+    //    var hub = new MutableServiceHub
+    //    {
+    //        ObjectController = mockObjectController.Object,
+    //        CurrentUserController = mockCurrentUserController.Object
+    //    };
+    //    hub.SetDefaults();
+    //    var client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+    //    var user = client.GenerateObjectFromState<ParseUser>(new MutableObjectState { ObjectId = TestObjectId }, "_User");
+
+    //    mockCurrentUserController.Setup(c => c.IsCurrent(user)).Returns(true);
+    //    mockObjectController.Setup(c => c.SaveAsync(It.IsAny<IObjectState>(), It.IsAny<IDictionary<string, IParseFieldOperation>>(), It.IsAny<string>(), It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
+    //        .ReturnsAsync(user.State);
+
+    //    // Act
+    //    user.Email = "new@email.com"; // Make the user dirty
+    //    await user.SaveAsync();
+
+    //    // Assert
+    //    mockCurrentUserController.Verify(c => c.SaveCurrentUserAsync(user, It.IsAny<CancellationToken>()), Times.Once);
+    //}
+
+    [TestMethod]
+    [Description("Tests IsLinked returns true when auth data for the provider exists.")]
+    public void IsLinked_WithExistingAuthData_ReturnsTrue()
+    {
+        var user = new ParseUser();
+        user.AuthData = new Dictionary<string, IDictionary<string, object>>
+        {
+            ["facebook"] = new Dictionary<string, object> { { "id", "123" } }
+        };
+
+        Assert.IsTrue(user.IsLinked("facebook"));
+    }
+
+    [TestMethod]
+    [Description("Tests IsLinked returns false when auth data for the provider is null or missing.")]
+    public void IsLinked_WithMissingAuthData_ReturnsFalse()
+    {
+        var user = new ParseUser();
+        user.AuthData = new Dictionary<string, IDictionary<string, object>>
+        {
+            ["twitter"] = null
+        };
+
+        Assert.IsFalse(user.IsLinked("facebook"));
+        Assert.IsFalse(user.IsLinked("twitter"));
+    }
+
+    [TestMethod]
+    [Description("Tests that HandleSave removes the password from the server data.")]
+    public void HandleSave_RemovesPasswordFromServerData()
+    {
+        // Arrange
+        var user = new ParseUser();
+        var serverState = new MutableObjectState
+        {
+            ServerData = new Dictionary<string, object>
+            {
+                ["username"] = TestUsername,
+                ["password"] = "some_hash_not_the_real_password"
+            }
+        };
+
+        // Act
+        user.HandleSave(serverState);
+
+        // Assert
+        Assert.IsFalse(user.State.ContainsKey("password"));
     }
 
 }

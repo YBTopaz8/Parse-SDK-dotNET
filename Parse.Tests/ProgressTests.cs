@@ -6,8 +6,6 @@ using Parse.Infrastructure;
 
 namespace Parse.Tests;
 
-#warning Refactor if possible.
-
 [TestClass]
 public class ProgressTests
 {
