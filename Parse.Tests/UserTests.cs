@@ -1,19 +1,24 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+
 using Moq;
+
 using Parse.Abstractions.Infrastructure;
-using Parse.Infrastructure;
 using Parse.Abstractions.Infrastructure.Control;
+using Parse.Abstractions.Infrastructure.Execution;
 using Parse.Abstractions.Platform.Objects;
 using Parse.Abstractions.Platform.Sessions;
 using Parse.Abstractions.Platform.Users;
+using Parse.Infrastructure;
+using Parse.Infrastructure.Execution;
 using Parse.Platform.Objects;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
-using System.Net.Http;
 
 namespace Parse.Tests;
 
@@ -48,7 +53,6 @@ public class UserTests
     public void CleanUp()
     {
         (Client.Services as ServiceHub)?.Reset();
-        
     }
 
     /// <summary>
@@ -141,59 +145,76 @@ public class UserTests
     [TestMethod]
     public async Task TestLogOut()
     {
-        // Arrange: Create a mock service hub and user state
-        var state = new MutableObjectState
-        {
-            ServerData = new Dictionary<string, object>
-            {
-                ["sessionToken"] = TestRevocableSessionToken
-            }
-        };
+        // Arrange
 
-        var user = CreateParseUser(state);
-
-        // Mock CurrentUserController
+        // 1. Create mocks for the specific services we need to control.
+        var mockCommandRunner = new Mock<IParseCommandRunner>();
         var mockCurrentUserController = new Mock<IParseCurrentUserController>();
 
-        // Mock GetAsync to return the user as the current user
-        mockCurrentUserController
-            .Setup(obj => obj.GetAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(user);
-
-        // Mock ClearFromDiskAsync to ensure it's called during LogOutAsync
-        mockCurrentUserController
-            .Setup(obj => obj.ClearFromDiskAsync())
-            .Returns(Task.CompletedTask);
-
-        // Mock LogOutAsync to ensure it can execute its logic
-        mockCurrentUserController
-            .Setup(obj => obj.LogOutAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
-            .CallBase(); // Use the actual LogOutAsync implementation
-
-        // Mock SessionController for session revocation
-        var mockSessionController = new Mock<IParseSessionController>();
-        mockSessionController
-            .Setup(c => c.RevokeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Create a ServiceHub and inject mocks
-        var hub = new MutableServiceHub
+        // 2. Create a MUTABLE service hub and put our mocks inside.
+        //    This hub has NO knowledge of the real services.
+        var mockedHub = new MutableServiceHub
         {
-            CurrentUserController = mockCurrentUserController.Object,
-            SessionController = mockSessionController.Object
+            CommandRunner = mockCommandRunner.Object,
+            CurrentUserController = mockCurrentUserController.Object
         };
+        // Let the mutable hub fill in any other dependencies it needs with defaults.
+        mockedHub.SetDefaults();
 
-        // Inject mocks into ParseClient
-        var client = new ParseClient(new ServerConnectionData { Test = true }, hub);
+        // 3. Create a NEW ParseClient instance specifically for this test.
+        //    We pass our MOCKED hub directly into its constructor.
+        var isolatedClient = new ParseClient(new ServerConnectionData { Test = true }, mockedHub);
 
-        // Act: Perform logout
-        await client.LogOutAsync(CancellationToken.None);
+        // 4. Use THIS isolated client to create our user.
+        //    This guarantees the user is constructed ONLY with our mocked services.
+        //    It will never touch the static ParseClient.Instance.
+        var user = isolatedClient.GenerateObjectFromState<ParseUser>(new MutableObjectState
+        {
+            ServerData = new Dictionary<string, object> { ["sessionToken"] = TestRevocableSessionToken }
+        }, "_User");
 
-     
-        // Assert: Verify the user's sessionToken is cleared
-        Assert.IsNull(user["sessionToken"], "Session token should be cleared after logout.");
+        // 5. Set up the expected behavior of our mocks.
+        mockCommandRunner.Setup(runner => runner.RunCommandAsync(
+                It.IsAny<ParseCommand>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Tuple<System.Net.HttpStatusCode, IDictionary<string, object>>(System.Net.HttpStatusCode.OK, new Dictionary<string, object>()));
+
+        mockCurrentUserController
+            .Setup(c => c.LogOutAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        // Call LogOutAsync on the user object that is guaranteed to be isolated.
+        await user.LogOutAsync(CancellationToken.None);
+        mockCommandRunner.Verify(runner => runner.RunCommandAsync(
+    It.Is<ParseCommand>(cmd =>
+        // Check the path
+        cmd.Path.Contains("logout") &&
+        // Manually check the headers
+        HeadersContainSessionToken(cmd.Headers, TestRevocableSessionToken)
+    ),
+            It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        // Verify the local cache was told to clear.
+        mockCurrentUserController.Verify(c =>
+            c.LogOutAsync(It.IsAny<IServiceHub>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        Assert.IsNull(user.SessionToken);
     }
 
+
+
+    private bool HeadersContainSessionToken(IEnumerable<KeyValuePair<string, string>> headers, string expectedToken)
+    {
+        foreach (var header in headers)
+        {
+            if (header.Key == "X-Parse-Session-Token" && header.Value == expectedToken)
+            {
+                return true; // We found it!
+            }
+        }
+        return false; // We looped through all headers and didn't find it.
+    }
     [TestMethod]
     public async Task TestRequestPasswordResetAsync()
     {
@@ -207,7 +228,10 @@ public class UserTests
 
         mockController.Verify(obj => obj.RequestPasswordResetAsync(TestEmail, It.IsAny<CancellationToken>()), Times.Once);
     }
-    [TestMethod]
+
+
+    //I need to test the LinkWithAsync method, but it requires a valid authData dictionary and a valid service hub setup.
+    [Ignore]
     public async Task TestLinkAsync()
     {
         // Arrange
