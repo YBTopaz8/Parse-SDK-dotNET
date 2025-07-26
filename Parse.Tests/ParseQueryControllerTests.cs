@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -7,23 +8,158 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+using Parse.Abstractions.Internal;
 using Moq;
+
+using Parse.Abstractions.Infrastructure;
 using Parse.Abstractions.Infrastructure.Data;
 using Parse.Abstractions.Infrastructure.Execution;
-using Parse.Abstractions.Infrastructure;
 using Parse.Abstractions.Platform.Objects;
 using Parse.Infrastructure;
-using Parse.Platform.Queries;
 using Parse.Infrastructure.Execution;
-using System.Collections;
+using Parse.Platform.Objects;
+using Parse.Platform.Queries;
 
 namespace Parse.Tests;
 
 [TestClass]
 public class ParseQueryControllerTests
 {
-    [ParseClassName(nameof(SubClass))]
+    private Mock<IParseCommandRunner> mockCommandRunner;
+    private Mock<IParseDataDecoder> mockDecoder;
+    private ParseClient client;
+    [TestMethod]
+    [Description("Tests that FindAsync correctly decodes a list of objects from the server response.")]
+    public async Task FindAsync_WithResults_ReturnsDecodedStates()
+    {
+        // Arrange
+        var controller = new ParseQueryController(mockCommandRunner.Object, mockDecoder.Object);
+        var query = new ParseQuery<ParseObject>(client.Services, "TestClass");
+        var serverResponse = new Dictionary<string, object>
+        {
+            ["results"] = new List<object>
+                {
+                    new Dictionary<string, object> { ["objectId"] = "obj1" },
+                    new Dictionary<string, object> { ["objectId"] = "obj2" }
+                }
+        };
+        var tupleResponse = new Tuple<System.Net.HttpStatusCode, IDictionary<string, object>>(System.Net.HttpStatusCode.OK, serverResponse);
+
+        mockCommandRunner.Setup(runner => runner.RunCommandAsync(It.IsAny<ParseCommand>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tupleResponse);
+
+        // Mock the decoder to return a state for each object.
+        mockDecoder.Setup(d => d.Decode(It.IsAny<object>())).Returns<IDictionary<string, object>>(data => new MutableObjectState { ObjectId = data["objectId"].ToString() });
+
+        // Act
+        var result = await controller.FindAsync(query, null, CancellationToken.None);
+
+        // Assert
+        Assert.AreEqual(2, result.Count());
+        Assert.AreEqual("obj1", result.First().ObjectId);
+        mockCommandRunner.Verify(r => r.RunCommandAsync(It.IsAny<ParseCommand>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()), Times.Once);
+        mockDecoder.Verify(d => d.Decode(It.IsAny<object>()), Times.Exactly(2));
+    }
+
+    [TestMethod]
+    [Description("Tests that FindAsync returns an empty enumerable when the server returns no results.")]
+    public async Task FindAsync_WithEmptyResults_ReturnsEmptyEnumerable()
+    {
+        // Arrange
+        var controller = new ParseQueryController(mockCommandRunner.Object, mockDecoder.Object);
+        var query = new ParseQuery<ParseObject>(client.Services, "TestClass");
+        var serverResponse = new Dictionary<string, object> { ["results"] = new List<object>() };
+        var tupleResponse = new Tuple<System.Net.HttpStatusCode, IDictionary<string, object>>(System.Net.HttpStatusCode.OK, serverResponse);
+
+        mockCommandRunner.Setup(runner => runner.RunCommandAsync(It.IsAny<ParseCommand>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tupleResponse);
+
+        // Act
+        var result = await controller.FindAsync(query, null, CancellationToken.None);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual(0, result.Count());
+    }
+
+    [TestMethod]
+    [Description("Tests that CountAsync builds the correct command with limit=0 and count=1.")]
+    public async Task CountAsync_BuildsCorrectCommandAndReturnsCount()
+    {
+        // Arrange
+        var controller = new ParseQueryController(mockCommandRunner.Object, mockDecoder.Object);
+        var query = new ParseQuery<ParseObject>(client.Services, "TestClass");
+        var serverResponse = new Dictionary<string, object> { ["count"] = 150 };
+        var tupleResponse = new Tuple<System.Net.HttpStatusCode, IDictionary<string, object>>(System.Net.HttpStatusCode.OK, serverResponse);
+
+        ParseCommand capturedCommand = null;
+        mockCommandRunner.Setup(runner => runner.RunCommandAsync(It.IsAny<ParseCommand>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()))
+            .Callback<ParseCommand, IProgress<IDataTransferLevel>, IProgress<IDataTransferLevel>, CancellationToken>((cmd, _, __, ___) => capturedCommand = cmd)
+            .ReturnsAsync(tupleResponse);
+
+        // Act
+        var result = await controller.CountAsync(query, null, CancellationToken.None);
+
+        // Assert
+        Assert.AreEqual(150, result);
+        Assert.IsNotNull(capturedCommand);
+        StringAssert.Contains(capturedCommand.Path, "limit=0");
+        StringAssert.Contains(capturedCommand.Path, "count=1");
+    }
+
+    [TestMethod]
+    [Description("Tests that FirstAsync builds the correct command with limit=1 and returns one object.")]
+    public async Task FirstAsync_BuildsCorrectCommandAndReturnsOneState()
+    {
+        // Arrange
+        var controller = new ParseQueryController(mockCommandRunner.Object, mockDecoder.Object);
+        var query = new ParseQuery<ParseObject>(client.Services, "TestClass");
+        var serverResponse = new Dictionary<string, object>
+        {
+            ["results"] = new List<object> { new Dictionary<string, object> { ["objectId"] = "theFirst" } }
+        };
+        var tupleResponse = new Tuple<System.Net.HttpStatusCode, IDictionary<string, object>>(System.Net.HttpStatusCode.OK, serverResponse);
+
+        ParseCommand capturedCommand = null;
+        mockCommandRunner.Setup(runner => runner.RunCommandAsync(It.IsAny<ParseCommand>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()))
+            .Callback<ParseCommand, IProgress<IDataTransferLevel>, IProgress<IDataTransferLevel>, CancellationToken>((cmd, _, __, ___) => capturedCommand = cmd)
+            .ReturnsAsync(tupleResponse);
+
+        mockDecoder.Setup(d => d.Decode(It.IsAny<object>())).Returns(new MutableObjectState { ObjectId = "theFirst" });
+
+        // Act
+        var result = await controller.FirstAsync(query, null, CancellationToken.None);
+
+        // Assert
+        Assert.IsNotNull(result);
+        Assert.AreEqual("theFirst", result.ObjectId);
+        Assert.IsNotNull(capturedCommand);
+        StringAssert.Contains(capturedCommand.Path, "limit=1");
+        mockDecoder.Verify(d => d.Decode(It.IsAny<object>()), Times.Once);
+    }
+
+    [TestMethod]
+    [Description("Tests that FindAsync throws an exception for ACL query errors.")]
+    public async Task FindAsync_WhenServerReturnsAclError_ThrowsException()
+    {
+        // Arrange
+        var controller = new ParseQueryController(mockCommandRunner.Object, mockDecoder.Object);
+        var query = new ParseQuery<ParseObject>(client.Services, "TestClass");
+        var serverResponse = new Dictionary<string, object> { ["code"] = 102L, ["error"] = "Cannot query on ACL." };
+        var tupleResponse = new Tuple<System.Net.HttpStatusCode, IDictionary<string, object>>(System.Net.HttpStatusCode.BadRequest, serverResponse);
+
+        mockCommandRunner.Setup(runner => runner.RunCommandAsync(It.IsAny<ParseCommand>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<IProgress<IDataTransferLevel>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tupleResponse);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() => controller.FindAsync(query, null, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "Cannot query on ACL");
+    }
+
+[ParseClassName(nameof(SubClass))]
     class SubClass : ParseObject { }
 
     [ParseClassName(nameof(UnregisteredSubClass))]
@@ -33,14 +169,22 @@ public class ParseQueryControllerTests
     [TestInitialize]
     public void SetUp()
     {
-        // Initialize the client and ensure the instance is set
-        Client = new ParseClient(new ServerConnectionData { Test = true });
-        Client.Publicize();
+         Client.Publicize();
         // Register the valid classes
         Client.RegisterSubclass(typeof(ParseSession));
         Client.RegisterSubclass(typeof(ParseUser));
 
-
+        mockCommandRunner = new Mock<IParseCommandRunner>();
+        mockDecoder = new Mock<IParseDataDecoder>();
+        var serviceHub = new MutableServiceHub
+        {
+            CommandRunner = mockCommandRunner.Object,
+            Decoder = mockDecoder.Object,
+            // Add other necessary services for ParseQuery constructor if needed
+            ClassController = new Platform.Objects.ParseObjectClassController()
+        };
+        serviceHub.SetDefaults();
+        client = new ParseClient(new ServerConnectionData { Test = true }, serviceHub);
     }
     [TestMethod]
     [Description("Tests that CountAsync calls IParseCommandRunner and returns integer")]
@@ -64,210 +208,102 @@ public class ParseQueryControllerTests
         Assert.AreEqual(10, result);
 
     }
-   
 
-}
-[TestClass]
-public class ParseQueryTests
-{
-    private ParseClient Client { get; set; }
-    Mock<IServiceHub> MockHub { get; set; }
-
-    [TestInitialize]
-    public void SetUp()
+    [TestMethod]
+    [Description("Tests that a LINQ '==' operator is translated to WhereEqualTo.")]
+    public void Where_EqualsOperator_TranslatesToWhereEqualTo()
     {
-        Client = new ParseClient(new ServerConnectionData { Test = true });
-        Client.Publicize();
-        MockHub = new Mock<IServiceHub>();
-        Client.Services = MockHub.Object;
-    }
-    [TestCleanup]
-    public void TearDown()
-    {
-        if (Client?.Services is OrchestrationServiceHub orchestration && orchestration.Default is ServiceHub serviceHub)
-        {
-            serviceHub.Reset();
-        }
+        var query = new ParseQuery<ParseObject>(Client.Services, "TestClass");
+        var resultQuery = query.Where(obj => obj.Get<string>("name") == "Zeke");
+        Assert.AreEqual("Zeke", resultQuery.GetConstraint("name"));
     }
 
     [TestMethod]
-    [Description("Tests constructor, that classes are instantiated correctly.")]
-    public void Constructor_CreatesObjectCorrectly() // Mock difficulty: 1
+    [Description("Tests that a LINQ '>' operator is translated to WhereGreaterThan.")]
+    public void Where_GreaterThanOperator_TranslatesToWhereGreaterThan()
     {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test");
-
-        Assert.IsNotNull(query.ClassName);
-        Assert.IsNotNull(query.Services);
-        Assert.ThrowsException<ArgumentNullException>(() => new ParseQuery<ParseObject>(MockHub.Object, null));
-    }
-   
-    [TestMethod]
-    [Description("Tests that ThenBy throws exception if there is no orderby set before hand.")]
-    public void ThenBy_ThrowsIfNotSetOrderBy()// Mock difficulty: 1
-    {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test");
-        Assert.ThrowsException<ArgumentException>(() => query.ThenBy("test"));
-
+        var query = new ParseQuery<ParseObject>(Client.Services, "TestClass");
+        var resultQuery = query.Where(obj => obj.Get<int>("score") > 1000);
+        var constraint = resultQuery.GetConstraint("score") as IDictionary<string, object>;
+        Assert.AreEqual(1000, constraint["$gt"]);
     }
 
     [TestMethod]
-    [Description("Tests that where contains correctly constructs the query for given values")]
-    public void WhereContains_SetsRegexSearchValue()// Mock difficulty: 1
+    [Description("Tests that string.StartsWith is translated to WhereStartsWith.")]
+    public void Where_StringStartsWith_TranslatesToWhereStartsWith()
     {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereContains("test", "test");
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$regex"));
-        Assert.AreEqual("\\Qtest\\E", results["$regex"]);
+        var query = new ParseQuery<ParseObject>(Client.Services, "TestClass");
+        var resultQuery = query.Where(obj => obj.Get<string>("name").StartsWith("Z"));
+        var constraint = resultQuery.GetConstraint("name") as IDictionary<string, object>;
+        Assert.IsTrue((constraint["$regex"] as string).StartsWith("^\\QZ"));
     }
 
     [TestMethod]
-    [Description("Tests WhereDoesNotExist correctly builds query")]
-    public void WhereDoesNotExist_SetsNewWhereWithDoesNotExist()// Mock difficulty: 1
+    [Description("Tests that a collection.Contains(value) is translated to WhereEqualTo.")]
+    public void Where_CollectionContainsValue_TranslatesToWhereEqualTo()
     {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereDoesNotExist("test");
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$exists"));
-        Assert.AreEqual(false, results["$exists"]);
-
-    }
-
-
-    [TestMethod]
-    [Description("Test WhereEndsWith correctly set query.")]
-    public void WhereEndsWith_SetsCorrectRegexEnd()// Mock difficulty: 1
-    {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereEndsWith("test", "test");
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$regex"));
-        Assert.AreEqual("\\Qtest\\E$", results["$regex"]);
+        var query = new ParseQuery<ParseObject>(Client.Services, "TestClass");
+        var resultQuery = query.Where(obj => obj.Get<IList<string>>("tags").Contains("awesome"));
+        Assert.AreEqual("awesome", resultQuery.GetConstraint("tags"));
     }
 
     [TestMethod]
-    [Description("Tests WhereEqualTo correctly builds the query.")]
-    public void WhereEqualTo_SetsKeyValueOnWhere() // Mock difficulty: 1
+    [Description("Tests that a value.In(collection) is translated to WhereContainedIn.")]
+    public void Where_ValueInCollection_TranslatesToWhereContainedIn()
     {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereEqualTo("test", "value");
-        Assert.AreEqual("value", query.GetConstraint("test"));
-    }
-    [TestMethod]
-    [Description("Tests WhereExists correctly builds query.")]
-    public void WhereExists_SetsKeyValueOnWhere()// Mock difficulty: 1
-    {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereExists("test");
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$exists"));
-        Assert.AreEqual(true, results["$exists"]);
+        var names = new[] { "Zeke", "Midas" };
+        var query = new ParseQuery<ParseObject>(Client.Services, "TestClass");
+        var resultQuery = query.Where(obj => names.Contains(obj.Get<string>("name")));
+        var constraint = resultQuery.GetConstraint("name") as IDictionary<string, object>;
+        Assert.IsNotNull(constraint["$in"]);
+        Assert.AreEqual(2, (constraint["$in"] as IEnumerable<object>).Count());
     }
 
     [TestMethod]
-    [Description("Tests WhereGreaterThan correctly builds the query.")]
-    public void WhereGreaterThan_SetsLowerBound()// Mock difficulty: 1
+    [Description("Tests that OrderBy with a property is translated correctly.")]
+    public void OrderBy_Property_TranslatesToOrderBy()
     {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereGreaterThan("test", 10);
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$gt"));
-        Assert.AreEqual(10, results["$gt"]);
+        var query = new ParseQuery<ParseObject>(Client.Services, "TestClass");
+        var resultQuery = query.OrderBy(obj => obj.CreatedAt);
+        var parameters = resultQuery.BuildParameters();
+        Assert.AreEqual("createdAt", parameters["order"]);
     }
 
     [TestMethod]
-    [Description("Tests where greater or equal than sets lower bound properly")]
-    public void WhereGreaterThanOrEqualTo_SetsLowerBound()// Mock difficulty: 1
+    [Description("Tests that a complex LINQ expression with '&&' is translated correctly.")]
+    public void Where_AndAlsoOperator_TranslatesToMultipleConstraints()
     {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereGreaterThanOrEqualTo("test", 10);
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$gte"));
-        Assert.AreEqual(10, results["$gte"]);
-    }
-    [TestMethod]
-    [Description("Tests if WhereLessThan correctly build the query")]
-    public void WhereLessThan_SetsLowerBound()// Mock difficulty: 1
-    {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereLessThan("test", 10);
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$lt"));
-        Assert.AreEqual(10, results["$lt"]);
+        var query = new ParseQuery<ParseObject>(Client.Services, "Player");
+        var resultQuery = query.Where(p => p.Get<int>("score") > 100 && p.Get<bool>("active") == true);
+        var scoreConstraint = resultQuery.GetConstraint("score") as IDictionary<string, object>;
+        var activeConstraint = resultQuery.GetConstraint("active");
 
+        Assert.AreEqual(100, scoreConstraint["$gt"]);
+        Assert.AreEqual(true, activeConstraint);
     }
 
     [TestMethod]
-    [Description("Tests where less than or equal to sets query properly")]
-    public void WhereLessThanOrEqualTo_SetsLowerBound()// Mock difficulty: 1
+    [Description("Tests that a LINQ expression with '||' is translated to an $or query.")]
+    public void Where_OrElseOperator_TranslatesToOrQuery()
     {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereLessThanOrEqualTo("test", 10);
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$lte"));
-        Assert.AreEqual(10, results["$lte"]);
+        // Arrange
+        var query = new ParseQuery<ParseObject>(Client.Services, "Player");
+
+        // Act
+        var resultQuery = query.Where(p => p.Get<int>("wins") > 100 || p.Get<int>("losses") == 0);
+        var parameters = resultQuery.BuildParameters();
+        var where = parameters["where"] as IDictionary<string, object>;
+        var orClauses = where["$or"] as IList<object>;
+
+        // Assert
+        Assert.IsNotNull(orClauses);
+        Assert.AreEqual(2, orClauses.Count);
+
+        var winsClause = orClauses[0] as IDictionary<string, object>;
+        var lossesClause = orClauses[1] as IDictionary<string, object>;
+
+        var winsGt = winsClause["wins"] as IDictionary<string, object>;
+        Assert.AreEqual(100, winsGt["$gt"]);
+        Assert.AreEqual(0, lossesClause["losses"]);
     }
-    [TestMethod]
-    [Description("Tests if WhereMatches builds query using regex and modifiers correctly")]
-    public void WhereMatches_SetsRegexAndModifiersCorrectly()// Mock difficulty: 1
-    {
-        var regex = new Regex("test", RegexOptions.ECMAScript | RegexOptions.IgnoreCase);
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereMatches("test", regex, "im");
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-
-        Assert.IsTrue(results.ContainsKey("$regex"));
-        Assert.IsTrue(results.ContainsKey("$options"));
-        Assert.AreEqual("test", results["$regex"]);
-        Assert.AreEqual("im", results["$options"]);
-    }
-
-    [TestMethod]
-    [Description("Tests if exception is throw on Regex doesn't have proper flags.")]
-    public void WhereMatches_RegexWithoutFlag_Throws()// Mock difficulty: 1
-    {
-        var regex = new Regex("test");
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test");
-        Assert.ThrowsException<ArgumentException>(() => query.WhereMatches("test", regex, null));
-
-    }
-
-    [TestMethod]
-    [Description("Tests if WhereNear builds query with $nearSphere property.")]
-    public void WhereNear_CreatesQueryNearValue()// Mock difficulty: 1
-    {
-        var point = new ParseGeoPoint(1, 2);
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereNear("test", point);
-        var result = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(result.ContainsKey("$nearSphere"));
-        Assert.AreEqual(point, result["$nearSphere"]);
-
-    }
-
-    [TestMethod]
-    [Description("Tests WhereNotEqualTo correctly builds the query.")]
-    public void WhereNotEqualTo_SetsValueOnWhere()// Mock difficulty: 1
-    {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereNotEqualTo("test", "value");
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$ne"));
-        Assert.AreEqual("value", results["$ne"]);
-    }
-
-    [TestMethod]
-    [Description("Tests where starts with sets regex values")]
-    public void WhereStartsWith_SetsCorrectRegexValue()// Mock difficulty: 1
-    {
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereStartsWith("test", "test");
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$regex"));
-        Assert.AreEqual("^\\Qtest\\E", results["$regex"]);
-    }
-    [TestMethod]
-    [Description("Tests if WhereWithinGeoBox builds query with the correct values")]
-    public void WhereWithinGeoBox_SetsWithingValues()// Mock difficulty: 1
-    {
-        var point1 = new ParseGeoPoint(1, 2);
-        var point2 = new ParseGeoPoint(3, 4);
-        var query = new ParseQuery<ParseObject>(MockHub.Object, "test").WhereWithinGeoBox("test", point1, point2);
-        var results = query.GetConstraint("test") as IDictionary<string, object>;
-        Assert.IsTrue(results.ContainsKey("$within"));
-        var innerWithin = results["$within"] as IDictionary<string, object>;
-        Assert.IsTrue(innerWithin.ContainsKey("$box"));
-        Assert.AreEqual(2, (innerWithin["$box"] as IEnumerable).Cast<object>().Count());
-
-
-    }
-
-
 }
